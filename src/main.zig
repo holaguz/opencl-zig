@@ -1,24 +1,59 @@
 const std = @import("std");
+const c = @import("c.zig");
 
-pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+const Context = struct {
+    platform_id: c.cl_platform_id,
+};
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+// ?*const fn ([*c]const u8, ?*const anyopaque, usize, ?*anyopaque) callconv(.C) void
+// void (CL_CALLBACK* pfn_notify)(const char* errinfo, const void* private_info, size_t cb, void* user_data),
+pub fn cl_ctx_callback(error_info: [*c]const u8, private_info: ?*const anyopaque, cb: usize, user_data: ?*anyopaque) callconv(.C) void {
+    _ = user_data; // autofix
+    _ = cb; // autofix
+    _ = private_info; // autofix
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try bw.flush(); // don't forget to flush!
+    std.log.info("cl_ctx_callback: {s}", .{error_info});
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+pub fn main() !void {
+    var platform_id: c.cl_platform_id = undefined;
+    var device_id: c.cl_device_id = undefined;
+
+    var ret_num_devices: c.cl_uint = undefined;
+    var ret_num_platforms: c.cl_uint = undefined;
+    var ret = c.clGetPlatformIDs(1, &platform_id, &ret_num_platforms);
+    ret = c.clGetDeviceIDs(platform_id, c.CL_DEVICE_TYPE_DEFAULT, 1, &device_id, &ret_num_devices);
+
+    std.log.debug("Found {d} platform(s) and {d} device(s)", .{ ret_num_platforms, ret_num_devices });
+
+    var platform_vendor: [64]u8 = undefined;
+    var platform_name: [64]u8 = undefined;
+    _ = c.clGetPlatformInfo(platform_id, c.CL_PLATFORM_NAME, 64, &platform_name, null);
+    _ = c.clGetPlatformInfo(platform_id, c.CL_PLATFORM_VENDOR, 64, &platform_vendor, null);
+
+    std.log.debug("Platform:", .{});
+    std.log.debug(" - Name:   {s}", .{platform_name});
+    std.log.debug(" - Vendor: {s}", .{platform_vendor});
+
+    var device_name: [64]u8 = undefined;
+    var device_vendor: [64]u8 = undefined;
+    _ = c.clGetDeviceInfo(device_id, c.CL_DEVICE_NAME, 64, &device_name, null);
+    _ = c.clGetDeviceInfo(device_id, c.CL_DEVICE_VENDOR, 64, &device_vendor, null);
+
+    std.log.debug("Device:", .{});
+    std.log.debug(" - Name:   {s}", .{device_name});
+    std.log.debug(" - Vendor: {s}", .{device_vendor});
+
+    const cl_ctx = c.clCreateContext(0, 1, &device_id, cl_ctx_callback, null, &ret);
+    if (ret != 0) {
+        std.log.err("Failed to create cl_context: {d}", .{ret});
+        return error.CreateContextError;
+    }
+
+    const command_queue = c.clCreateCommandQueueWithProperties(cl_ctx, device_id, 696969, &ret);
+    _ = command_queue;
+    if (ret != 0) {
+        std.log.err("Failed to create command queue: {d}", .{ret});
+        return error.CreateCmdQueueError;
+    }
 }
