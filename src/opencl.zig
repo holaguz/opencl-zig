@@ -4,12 +4,19 @@ const Allocator = std.mem.Allocator;
 
 pub const OpenCLContext = struct {
     const KernelContainer = std.StringArrayHashMap(c.cl_kernel);
+    const BufferMeta = struct {
+        buffer: c.cl_mem,
+        size: usize,
+        flags: c.cl_mem_flags,
+        host_ptr: ?*anyopaque,
+    };
 
     context: c.cl_context,
     command_queue: c.cl_command_queue,
     device_id: c.cl_device_id,
     program: c.cl_program,
     kernels: KernelContainer,
+    buffers: std.ArrayList(BufferMeta),
 
     pub fn init(alloc: Allocator, device_id: c.cl_device_id, program_source: [*:0]const u8) !OpenCLContext {
         var ret: c.cl_int = undefined;
@@ -31,6 +38,7 @@ pub const OpenCLContext = struct {
         errdefer c.clReleaseProgram(program);
 
         const kernels = KernelContainer.init(alloc);
+        const buffers = std.ArrayList(BufferMeta).init(alloc);
 
         return OpenCLContext{
             .context = context,
@@ -38,6 +46,7 @@ pub const OpenCLContext = struct {
             .device_id = device_id,
             .program = program,
             .kernels = kernels,
+            .buffers = buffers,
         };
     }
 
@@ -49,6 +58,10 @@ pub const OpenCLContext = struct {
             _ = c.clReleaseKernel(kernel);
         }
         self.kernels.deinit();
+
+        for (self.buffers.items) |buffer| {
+            _ = c.clReleaseMemObject(buffer.buffer);
+        }
 
         _ = c.clReleaseProgram(self.program);
     }
@@ -67,6 +80,40 @@ pub const OpenCLContext = struct {
         try check_cl_error(ret, error.CreateKernelError);
         try self.kernels.put(kernel_name, kernel);
         return kernel;
+    }
+
+    pub fn create_buffer(self: *OpenCLContext, size: usize, flags: c.cl_mem_flags, host_ptr: ?*anyopaque) !c.cl_mem {
+        var ret: c.cl_int = undefined;
+        const buffer_obj = c.clCreateBuffer(self.context, flags, size, host_ptr, &ret);
+        try check_cl_error(ret, error.CreateBufferError);
+        try self.buffers.append(.{
+            .buffer = buffer_obj,
+            .size = size,
+            .flags = flags,
+            .host_ptr = host_ptr,
+        });
+        return buffer_obj;
+    }
+
+    pub fn write_buffer(self: *OpenCLContext, comptime T: type, buffer: c.cl_mem, data: []const T) !void {
+        var ret: c.cl_int = undefined;
+        const size = data.len * @sizeOf(T);
+        ret = c.clEnqueueWriteBuffer(self.command_queue, buffer, c.CL_TRUE, 0, size, data.ptr, 0, null, null);
+        try check_cl_error(ret, error.WriteBufferError);
+    }
+
+    pub fn read_buffer(self: *OpenCLContext, comptime T: type, buffer: c.cl_mem, data: []T) !void {
+        var ret: c.cl_int = undefined;
+        const size = data.len * @sizeOf(T);
+        ret = c.clEnqueueReadBuffer(self.command_queue, buffer, c.CL_TRUE, 0, size, data.ptr, 0, null, null);
+        try check_cl_error(ret, error.ReadBufferError);
+    }
+
+    pub fn set_kernel_arg(self: *OpenCLContext, kernel: c.cl_kernel, arg_index: c.cl_uint, arg_value: *c.cl_mem) !void {
+        _ = self;
+        var ret: c.cl_int = undefined;
+        ret = c.clSetKernelArg(kernel, arg_index, @sizeOf(c.cl_mem), @ptrCast(arg_value));
+        try check_cl_error(ret, error.SetKernelArgError);
     }
 
     // pub fn load_kernel_args();

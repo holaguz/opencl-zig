@@ -18,12 +18,22 @@ pub fn main() !void {
     const alloc = gpa.allocator();
     var ret: c.cl_int = undefined;
 
+    // Get a device_id
     const device_id = ocl.enumerate();
-    const program_source = @embedFile("program.cl");
-    var ctx = try ocl.OpenCLContext.init(alloc, device_id, program_source);
 
+    // Load the program source
+    const program_source = @embedFile("program.cl");
+
+    // Create an OpenCL context with the device_id and program source
+    var ctx = try ocl.OpenCLContext.init(alloc, device_id, program_source);
+    defer ctx.deinit();
+
+    // Create a kernel. A kernel is a function defined in the program source.
     const kernel = try ctx.create_kernel("square_i32");
 
+    // Create input and output buffers. Later we'll upload the input buffer to the device, run the
+    // kernel, and download the output buffer.
+    // 'h' stands for host, 'd' stands for device (i.e. where the kernel runs)
     var h_input: [32]i32 = undefined;
     var h_output: [32]i32 = undefined;
 
@@ -31,32 +41,36 @@ pub fn main() !void {
         h_input[i] = @intCast(i);
     }
 
-    const d_input: c.cl_mem = try create_cl_mem_obj(i32, ctx.context, c.CL_MEM_READ_ONLY | c.CL_MEM_COPY_HOST_PTR, &h_input);
-    defer _ = c.clReleaseMemObject(d_input);
+    // Create the input and output buffers on the device.
+    var d_input = try ctx.create_buffer(h_input.len * @sizeOf(i32), c.CL_MEM_READ_ONLY, null);
+    var d_output = try ctx.create_buffer(h_output.len * @sizeOf(i32), c.CL_MEM_WRITE_ONLY, null);
 
-    const d_output: c.cl_mem = try create_cl_mem_obj(i32, ctx.context, c.CL_MEM_WRITE_ONLY | c.CL_MEM_USE_HOST_PTR, &h_output);
-    defer _ = c.clReleaseMemObject(d_output);
+    // Copy the input buffer values to the device
+    try ctx.write_buffer(i32, d_input, &h_input);
 
-    // ret = c.clEnqueueWriteBuffer(command_queue, d_input, c.CL_TRUE, 0, @sizeOf(i32) * h_input.len, &h_input, 0, null, null);
-    // try check_ocl_error(ret, error.Enqueue);
+    // Set the kernel arguments. These arguments map to the arguments of the kernel function, i.e.
+    // the first argument of the kernel function maps to the argument number 0.
+    try ctx.set_kernel_arg(kernel, 0, &d_input);
+    try ctx.set_kernel_arg(kernel, 1, &d_output);
 
-    ret = c.clSetKernelArg(kernel, 0, @sizeOf(c.cl_mem), @ptrCast(&d_input));
-    try check_cl_error(ret, error.SetKernelArgError);
-    ret = c.clSetKernelArg(kernel, 1, @sizeOf(c.cl_mem), @ptrCast(&d_output));
-    try check_cl_error(ret, error.SetKernelArgError);
+    // How many work items to run in parallel. This is the number of elements in the input buffer.
+    const global_item_size: usize = h_output.len;
 
-    const global_item_size: usize = h_output.len; // Process the entire lists
-    const local_item_size: usize = 4; // Divide work items into groups of 4
+    // How many work items to run in parallel per work group.
+    const local_item_size: usize = 4;
 
+    // Run the kernel
     ret = c.clEnqueueNDRangeKernel(ctx.command_queue, kernel, 1, null, &global_item_size, &local_item_size, 0, null, null);
     try check_cl_error(ret, error.EnqueueKernel);
 
-    ret = c.clFinish(ctx.command_queue); // Wait for the command queue to get processed
+    // Wait for the command queue to get processed
+    ret = c.clFinish(ctx.command_queue);
     try check_cl_error(ret, error.Finish);
 
-    ret = c.clEnqueueReadBuffer(ctx.command_queue, d_output, c.CL_TRUE, 0, @sizeOf(i32) * h_output.len, &h_output, 0, null, null);
-    try check_cl_error(ret, error.EnqueueRead);
+    // Copy the output buffer values from the device
+    try ctx.read_buffer(i32, d_output, &h_output);
 
+    // Log the results
     for (0..h_output.len, h_output) |idx, out| {
         std.log.info("{d} -> {d}", .{ idx, out });
     }
