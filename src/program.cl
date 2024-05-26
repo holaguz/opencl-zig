@@ -1,10 +1,10 @@
-__kernel void vector_add(__global const int *A, __global const int *B, __global int *C) {
+__kernel void square_i32(__global int *Input, __global int* Output) {
  
     // Get the index of the current element to be processed
     int i = get_global_id(0);
  
     // Do the operation
-    C[i] = A[i] + B[i];
+    Output[i] = Input[i] * Input[i];
 }
 
 // vim: ft=c
