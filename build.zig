@@ -12,11 +12,11 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.addIncludePath(.{ .path = "/usr/include/" });
-
     exe.linkSystemLibrary("opencl");
     exe.linkLibC();
 
     b.installArtifact(exe);
+    b.installFile("src/program.cl", "bin/program.cl");
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
