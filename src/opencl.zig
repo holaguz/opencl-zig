@@ -42,15 +42,15 @@ pub const OpenCLContext = struct {
     }
 
     pub fn deinit(self: *OpenCLContext) void {
-        c.clReleaseContext(self.context);
-        c.clReleaseCommandQueue(self.command_queue);
+        _ = c.clReleaseContext(self.context);
+        _ = c.clReleaseCommandQueue(self.command_queue);
 
-        for (self.kernels.items()) |kernel| {
-            c.clReleaseKernel(kernel);
+        for (self.kernels.values()) |kernel| {
+            _ = c.clReleaseKernel(kernel);
         }
         self.kernels.deinit();
 
-        c.clReleaseProgram(self.program);
+        _ = c.clReleaseProgram(self.program);
     }
 
     pub fn get_kernel(self: *OpenCLContext, kernel_name: []const u8) ?c.cl_kernel {
