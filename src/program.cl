@@ -7,7 +7,7 @@ __kernel void square_i32(__global int *Input, __global int* Output) {
     Output[i] = Input[i] * Input[i];
 }
 
-__kernel void vecmul_f32(__global float *a, __global float* b, __global float* out, uint n, int offset) {
+__kernel void vecmul_i32(__global int *a, __global int* b, __global int* out, const uint n, const int offset) {
 
     int i = get_global_id(0);
     int j = i + offset;
