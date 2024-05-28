@@ -109,14 +109,31 @@ pub const OpenCLContext = struct {
         try check_cl_error(ret, error.ReadBufferError);
     }
 
-    pub fn set_kernel_arg(self: *OpenCLContext, kernel: c.cl_kernel, arg_index: c.cl_uint, arg_value: *c.cl_mem) !void {
+    pub fn set_kernel_arg(self: *OpenCLContext, kernel: c.cl_kernel, arg_index: c.cl_uint, arg_value: anytype) !void {
         _ = self;
+        comptime {
+            const type_info = @typeInfo(@TypeOf(arg_value));
+            if (@as(std.builtin.Type, type_info) != std.builtin.TypeId.Pointer) {
+                @compileError("Argument must be a pointer");
+            }
+        }
+
         var ret: c.cl_int = undefined;
-        ret = c.clSetKernelArg(kernel, arg_index, @sizeOf(c.cl_mem), @ptrCast(arg_value));
+        const arg_size = @sizeOf(@typeInfo(@TypeOf(arg_value)).Pointer.child);
+        ret = c.clSetKernelArg(kernel, arg_index, arg_size, @ptrCast(arg_value));
         try check_cl_error(ret, error.SetKernelArgError);
     }
 
-    // pub fn load_kernel_args();
+    pub fn run_kernel(self: *OpenCLContext, block: bool, kernel: c.cl_kernel, work_dim: u32, global_work_offset: usize, global_work_size: usize, local_item_size: usize) !void {
+        var ret: c.cl_int = undefined;
+        ret = c.clEnqueueNDRangeKernel(self.command_queue, kernel, work_dim, &global_work_offset, &global_work_size, &local_item_size, 0, null, null);
+        try check_cl_error(ret, error.EnqueueKernel);
+
+        if (block) {
+            ret = c.clFinish(self.command_queue);
+            try check_cl_error(ret, error.KernelFinish);
+        }
+    }
 };
 
 pub fn check_cl_error(ret: c.cl_int, err: ?anyerror) !void {
